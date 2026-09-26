@@ -24,11 +24,19 @@ def parse_fit_file(file_bytes):
             r_data[data_entry.name] = data_entry.value
         data.append(r_data)
     df = pd.DataFrame(data)
+    
     if 'timestamp' in df.columns:
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=3) # Israel Time (UTC+3)
-    if 'speed' in df.columns:
+    
+    # Extract speed reliably (check 'enhanced_speed' first, then 'speed')
+    if 'enhanced_speed' in df.columns and df['enhanced_speed'].notna().any():
+        df['speed_kmh'] = df['enhanced_speed'] * 3.6
+    elif 'speed' in df.columns and df['speed'].notna().any():
         df['speed_kmh'] = df['speed'] * 3.6
+    else:
+        df['speed_kmh'] = 0.0
+        
     return df
 
 if uploaded_files:
@@ -64,15 +72,28 @@ if uploaded_files:
         
         col_gen1, col_gen2, col_gen3 = st.columns(3)
         
-        # 1. Heart Rate Comparison
+        # Initialize session states for comparative view
+        if 'show_comp_hr' not in st.session_state: st.session_state.show_comp_hr = False
+        if 'show_comp_speed' not in st.session_state: st.session_state.show_comp_speed = False
+        if 'show_comp_map' not in st.session_state: st.session_state.show_comp_map = False
+
         if col_gen1.button("📊 Heart Rate Comparison"):
-            fig, ax = plt.subplots(figsize=(10, 5))
+            st.session_state.show_comp_hr = not st.session_state.show_comp_hr
+
+        if col_gen2.button("🚀 Speed Comparison"):
+            st.session_state.show_comp_speed = not st.session_state.show_comp_speed
+
+        if col_gen3.button("🗺️ Combined GPS Route Map"):
+            st.session_state.show_comp_map = not st.session_state.show_comp_map
+
+        # Render Comparative Charts based on State
+        if st.session_state.show_comp_hr:
+            fig, ax = plt.subplots(figsize=(10, 4))
             for w in workouts:
                 df = w['df']
                 if 'heart_rate' in df.columns and not df['heart_rate'].dropna().empty:
                     label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
                     ax.plot(df['elapsed_min'], df['heart_rate'], label=label_str, alpha=0.8, linewidth=1.5)
-            
             ax.set_title("Heart Rate Comparison Over Time", fontsize=12)
             ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
             ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
@@ -80,15 +101,13 @@ if uploaded_files:
             ax.legend(loc='best', fontsize='small')
             st.pyplot(fig)
 
-        # 2. Speed Comparison
-        if col_gen2.button("🚀 Speed Comparison"):
-            fig, ax = plt.subplots(figsize=(10, 5))
+        if st.session_state.show_comp_speed:
+            fig, ax = plt.subplots(figsize=(10, 4))
             for w in workouts:
                 df = w['df']
                 if 'speed_kmh' in df.columns and not df['speed_kmh'].dropna().empty:
                     label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
                     ax.plot(df['elapsed_min'], df['speed_kmh'], label=label_str, alpha=0.8, linewidth=1.5)
-            
             ax.set_title("Speed Comparison Over Time", fontsize=12)
             ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
             ax.set_ylabel("Speed (km/h)", fontsize=10)
@@ -96,10 +115,9 @@ if uploaded_files:
             ax.legend(loc='best', fontsize='small')
             st.pyplot(fig)
 
-        # 3. Combined GPS Map with Real Map Background
-        if col_gen3.button("🗺️ Combined GPS Route Map"):
+        if st.session_state.show_comp_map:
             gps_tracks = []
-            colors = ['blue', 'red', 'green', 'purple', 'orange', 'darkred', 'lightred', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'pink', 'gray', 'black']
+            colors = ['blue', 'red', 'green', 'purple', 'orange', 'darkred', 'darkblue', 'darkgreen', 'cadetblue', 'pink', 'black']
             
             for w in workouts:
                 df = w['df']
@@ -112,20 +130,18 @@ if uploaded_files:
                         gps_tracks.append((label_str, list(zip(lats, lons))))
             
             if gps_tracks:
-                # Find map center
                 all_lats = [pt[0] for track in gps_tracks for pt in track[1]]
                 all_lons = [pt[1] for track in gps_tracks for pt in track[1]]
                 center_lat = sum(all_lats) / len(all_lats)
                 center_lon = sum(all_lons) / len(all_lons)
                 
                 m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles="OpenStreetMap")
-                
                 for idx, (label, coords) in enumerate(gps_tracks):
                     color = colors[idx % len(colors)]
                     folium.PolyLine(coords, color=color, weight=3.5, opacity=0.85, popup=label, tooltip=label).add_to(m)
                 
                 st.subheader("All Workout Routes on Interactive Real Map")
-                st_folium(m, width=900, height=500)
+                st_folium(m, width=900, height=500, key="combined_map")
             else:
                 st.warning("No GPS data found in uploaded files.")
 
@@ -138,8 +154,26 @@ if uploaded_files:
             with st.expander(f"📌 Workout {i+1}: {dt_str} (ID: {w['act_id']})"):
                 col1, col2, col3 = st.columns(3)
                 
-                # 1. Individual Heart Rate & Speed Chart
-                if col1.button(f"📈 HR & Speed Chart", key=f"hr_{i}"):
+                # Session state keys for individual workouts
+                key_hr = f"view_hr_{i}"
+                key_map = f"view_map_{i}"
+                key_stats = f"view_stats_{i}"
+                
+                if key_hr not in st.session_state: st.session_state[key_hr] = False
+                if key_map not in st.session_state: st.session_state[key_map] = False
+                if key_stats not in st.session_state: st.session_state[key_stats] = False
+
+                if col1.button(f"📈 HR & Speed Chart", key=f"btn_hr_{i}"):
+                    st.session_state[key_hr] = not st.session_state[key_hr]
+
+                if col2.button(f"🗺️ Real Map Route", key=f"btn_map_{i}"):
+                    st.session_state[key_map] = not st.session_state[key_map]
+
+                if col3.button(f"📊 Session Stats", key=f"btn_stats_{i}"):
+                    st.session_state[key_stats] = not st.session_state[key_stats]
+
+                # Render Individual Items
+                if st.session_state[key_hr]:
                     df = w['df']
                     fig, ax1 = plt.subplots(figsize=(10, 4))
                     
@@ -148,7 +182,7 @@ if uploaded_files:
                         ax1.set_ylabel('Heart Rate (bpm)', color='red')
                         ax1.set_xlabel('Elapsed Time (min)')
                     
-                    if 'speed_kmh' in df.columns:
+                    if 'speed_kmh' in df.columns and df['speed_kmh'].max() > 0:
                         ax2 = ax1.twinx()
                         ax2.plot(df['elapsed_min'], df['speed_kmh'], color='blue', alpha=0.6, label='Speed (km/h)', linewidth=1.2)
                         ax2.set_ylabel('Speed (km/h)', color='blue')
@@ -156,8 +190,7 @@ if uploaded_files:
                     plt.title(f"Heart Rate & Speed - {dt_str}")
                     st.pyplot(fig)
 
-                # 2. Individual GPS Route with Real Map Background
-                if col2.button(f"🗺️ Real Map Route", key=f"map_{i}"):
+                if st.session_state[key_map]:
                     df = w['df']
                     if 'position_lat' in df.columns and 'position_long' in df.columns:
                         map_df = df.dropna(subset=['position_lat', 'position_long']).copy()
@@ -173,12 +206,11 @@ if uploaded_files:
                             folium.PolyLine(coords, color='blue', weight=4, opacity=0.85, tooltip=f"Workout: {dt_str}").add_to(m_ind)
                             
                             st.subheader(f"Route Map - {dt_str}")
-                            st_folium(m_ind, width=700, height=450, key=f"folium_map_{i}")
+                            st_folium(m_ind, width=700, height=450, key=f"ind_map_{i}")
                     else:
                         st.warning("No GPS data found in this file.")
 
-                # 3. Workout Statistics
-                if col3.button(f"📊 Session Stats", key=f"stats_{i}"):
+                if st.session_state[key_stats]:
                     df = w['df']
                     duration = (df['timestamp'].iloc[-1] - df['timestamp'].iloc[0]).total_seconds() / 60
                     max_speed = df['speed_kmh'].max() if 'speed_kmh' in df.columns else 0
