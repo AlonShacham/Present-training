@@ -1,6 +1,7 @@
 streamlit
 pandas
 fitparse
+gpxpy
 matplotlib
 folium
 streamlit-folium
