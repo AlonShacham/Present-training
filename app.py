@@ -4,14 +4,16 @@ import numpy as np
 import datetime
 import fitparse
 import matplotlib.pyplot as plt
+import folium
+from streamlit_folium import st_folium
 
-st.set_page_config(page_title="מנתח אימוני Garmin", layout="wide")
+st.set_page_config(page_title="Garmin Workout Analyzer", layout="wide")
 
-st.title("🏃‍♂️ מנתח קובצי אימון Garmin (FIT)")
-st.write("העלה את קובצי ה-FIT שלך כדי לראות את רשימת המסלולים, להציג גרפים השוואתיים או גרפים נפרדים בלחיצת כפתור.")
+st.title("🏃‍♂️ Garmin Workout Analyzer (FIT Files)")
+st.write("Upload your Garmin FIT files to view workout summaries, general comparison charts, or individual session analysis with interactive real maps.")
 
-# העלאת קבצים
-uploaded_files = st.file_uploader("בחר קובצי FIT", type=["fit", "FIT"], accept_multiple_files=True)
+# File uploader
+uploaded_files = st.file_uploader("Choose FIT Files", type=["fit", "FIT"], accept_multiple_files=True)
 
 def parse_fit_file(file_bytes):
     fitfile = fitparse.FitFile(file_bytes)
@@ -24,13 +26,13 @@ def parse_fit_file(file_bytes):
     df = pd.DataFrame(data)
     if 'timestamp' in df.columns:
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=3) # שעון ישראל
+        df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=3) # Israel Time (UTC+3)
     if 'speed' in df.columns:
         df['speed_kmh'] = df['speed'] * 3.6
     return df
 
 if uploaded_files:
-    st.success(f"הועלו {len(uploaded_files)} קבצים בהצלחה!")
+    st.success(f"{len(uploaded_files)} file(s) uploaded successfully!")
     
     workouts = []
     
@@ -40,7 +42,7 @@ if uploaded_files:
             if not df.empty and 'timestamp' in df.columns:
                 start_time = df['timestamp'].iloc[0]
                 act_id = f.name.split('_')[0]
-                # חישוב זמן מתחילת האימון בדקות
+                # Elapsed time calculations
                 df['elapsed_sec'] = (df['timestamp'] - start_time).dt.total_seconds()
                 df['elapsed_min'] = df['elapsed_sec'] / 60.0
                 
@@ -51,127 +53,137 @@ if uploaded_files:
                     'df': df
                 })
         except Exception as e:
-            st.error(f"שגיאה בקריאת הקובץ {f.name}: {e}")
+            st.error(f"Error parsing file {f.name}: {e}")
 
     if workouts:
-        # מיון כרונולוגי של האימונים
+        # Chronological sort
         workouts = sorted(workouts, key=lambda x: x['start_time'])
 
         st.markdown("---")
-        st.header("🌐 גרפים השוואתיים לכל האימונים (אחד על השני)")
+        st.header("🌐 Comparative Charts (All Workouts)")
         
         col_gen1, col_gen2, col_gen3 = st.columns(3)
         
-        # 1. גרף השוואת דופק מרוכז
-        if col_gen1.button("📊 השוואת דופק (כל האימונים)"):
+        # 1. Heart Rate Comparison
+        if col_gen1.button("📊 Heart Rate Comparison"):
             fig, ax = plt.subplots(figsize=(10, 5))
             for w in workouts:
                 df = w['df']
                 if 'heart_rate' in df.columns and not df['heart_rate'].dropna().empty:
-                    label_str = f"{w['start_time'].strftime('%d/%m/%Y')} ({w['act_id']})"
+                    label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
                     ax.plot(df['elapsed_min'], df['heart_rate'], label=label_str, alpha=0.8, linewidth=1.5)
             
-            ax.set_title("השוואת דופק לאורך זמן (Heart Rate Comparison)", fontsize=12)
-            ax.set_xlabel("זמן מתחילת האימון (דקות)", fontsize=10)
-            ax.set_ylabel("דופק (bpm)", fontsize=10)
+            ax.set_title("Heart Rate Comparison Over Time", fontsize=12)
+            ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
+            ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
             ax.grid(True, linestyle='--', alpha=0.5)
             ax.legend(loc='best', fontsize='small')
             st.pyplot(fig)
 
-        # 2. גרף השוואת מהירות מרוכז
-        if col_gen2.button("🚀 השוואת מהירות (כל האימונים)"):
+        # 2. Speed Comparison
+        if col_gen2.button("🚀 Speed Comparison"):
             fig, ax = plt.subplots(figsize=(10, 5))
             for w in workouts:
                 df = w['df']
                 if 'speed_kmh' in df.columns and not df['speed_kmh'].dropna().empty:
-                    label_str = f"{w['start_time'].strftime('%d/%m/%Y')} ({w['act_id']})"
+                    label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
                     ax.plot(df['elapsed_min'], df['speed_kmh'], label=label_str, alpha=0.8, linewidth=1.5)
             
-            ax.set_title("השוואת מהירות לאורך זמן (Speed Comparison)", fontsize=12)
-            ax.set_xlabel("זמן מתחילת האימון (דקות)", fontsize=10)
-            ax.set_ylabel("מהירות (קמ\"ש)", fontsize=10)
+            ax.set_title("Speed Comparison Over Time", fontsize=12)
+            ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
+            ax.set_ylabel("Speed (km/h)", fontsize=10)
             ax.grid(True, linestyle='--', alpha=0.5)
             ax.legend(loc='best', fontsize='small')
             st.pyplot(fig)
 
-        # 3. מפת מסלולי GPS מאוחדת לכל האימונים (קווים דקים ללא נקודות)
-        if col_gen3.button("🗺️ מפת כל המסלולים (GPS Combined)"):
-            fig, ax = plt.subplots(figsize=(10, 6))
-            has_gps = False
+        # 3. Combined GPS Map with Real Map Background
+        if col_gen3.button("🗺️ Combined GPS Route Map"):
+            gps_tracks = []
+            colors = ['blue', 'red', 'green', 'purple', 'orange', 'darkred', 'lightred', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'pink', 'gray', 'black']
+            
             for w in workouts:
                 df = w['df']
                 if 'position_lat' in df.columns and 'position_long' in df.columns:
                     map_df = df.dropna(subset=['position_lat', 'position_long']).copy()
                     if not map_df.empty:
-                        lats = map_df['position_lat'] * (180 / 2**31)
-                        lons = map_df['position_long'] * (180 / 2**31)
-                        label_str = f"{w['start_time'].strftime('%d/%m/%Y')} ({w['act_id']})"
-                        ax.plot(lons, lats, label=label_str, linewidth=1.2, alpha=0.8)
-                        has_gps = True
+                        lats = (map_df['position_lat'] * (180 / 2**31)).tolist()
+                        lons = (map_df['position_long'] * (180 / 2**31)).tolist()
+                        label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
+                        gps_tracks.append((label_str, list(zip(lats, lons))))
             
-            if has_gps:
-                ax.set_title("מפת מסלולי GPS של כל האימונים", fontsize=12)
-                ax.set_xlabel("Longitude (°)", fontsize=10)
-                ax.set_ylabel("Latitude (°)", fontsize=10)
-                ax.grid(True, linestyle='--', alpha=0.5)
-                ax.legend(loc='best', fontsize='small')
-                st.pyplot(fig)
+            if gps_tracks:
+                # Find map center
+                all_lats = [pt[0] for track in gps_tracks for pt in track[1]]
+                all_lons = [pt[1] for track in gps_tracks for pt in track[1]]
+                center_lat = sum(all_lats) / len(all_lats)
+                center_lon = sum(all_lons) / len(all_lons)
+                
+                m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles="OpenStreetMap")
+                
+                for idx, (label, coords) in enumerate(gps_tracks):
+                    color = colors[idx % len(colors)]
+                    folium.PolyLine(coords, color=color, weight=3.5, opacity=0.85, popup=label, tooltip=label).add_to(m)
+                
+                st.subheader("All Workout Routes on Interactive Real Map")
+                st_folium(m, width=900, height=500)
             else:
-                st.warning("לא נמצאו נתוני GPS בקבצים אלו.")
+                st.warning("No GPS data found in uploaded files.")
 
         st.markdown("---")
-        st.subheader("📋 רשימת מסלולים ואימונים נפרדים:")
+        st.subheader("📋 Workout List & Individual Sessions:")
 
         for i, w in enumerate(workouts):
-            dt_str = w['start_time'].strftime('%d/%m/%Y בשעה %H:%M')
+            dt_str = w['start_time'].strftime('%Y-%m-%d at %H:%M')
             
-            with st.expander(f"📌 אימון {i+1}: {dt_str} (מזהה: {w['act_id']})"):
+            with st.expander(f"📌 Workout {i+1}: {dt_str} (ID: {w['act_id']})"):
                 col1, col2, col3 = st.columns(3)
                 
-                # כפתור 1: גרף דופק ומהירות אישי
-                if col1.button(f"📈 גרף דופק ומהירות", key=f"hr_{i}"):
+                # 1. Individual Heart Rate & Speed Chart
+                if col1.button(f"📈 HR & Speed Chart", key=f"hr_{i}"):
                     df = w['df']
                     fig, ax1 = plt.subplots(figsize=(10, 4))
                     
                     if 'heart_rate' in df.columns:
                         ax1.plot(df['elapsed_min'], df['heart_rate'], color='red', label='Heart Rate (bpm)', linewidth=1.2)
                         ax1.set_ylabel('Heart Rate (bpm)', color='red')
-                        ax1.set_xlabel('זמן (דקות)')
+                        ax1.set_xlabel('Elapsed Time (min)')
                     
                     if 'speed_kmh' in df.columns:
                         ax2 = ax1.twinx()
                         ax2.plot(df['elapsed_min'], df['speed_kmh'], color='blue', alpha=0.6, label='Speed (km/h)', linewidth=1.2)
                         ax2.set_ylabel('Speed (km/h)', color='blue')
                         
-                    plt.title(f"דופק ומהירות - {dt_str}")
+                    plt.title(f"Heart Rate & Speed - {dt_str}")
                     st.pyplot(fig)
 
-                # כפתור 2: מפת מסלול GPS אישית (קו דק חלק)
-                if col2.button(f"🗺️ מפת מסלול (GPS)", key=f"map_{i}"):
+                # 2. Individual GPS Route with Real Map Background
+                if col2.button(f"🗺️ Real Map Route", key=f"map_{i}"):
                     df = w['df']
                     if 'position_lat' in df.columns and 'position_long' in df.columns:
                         map_df = df.dropna(subset=['position_lat', 'position_long']).copy()
                         if not map_df.empty:
-                            lats = map_df['position_lat'] * (180 / 2**31)
-                            lons = map_df['position_long'] * (180 / 2**31)
+                            lats = (map_df['position_lat'] * (180 / 2**31)).tolist()
+                            lons = (map_df['position_long'] * (180 / 2**31)).tolist()
+                            coords = list(zip(lats, lons))
                             
-                            fig, ax = plt.subplots(figsize=(8, 5))
-                            ax.plot(lons, lats, color='#1f77b4', linewidth=1.5)
-                            ax.set_title(f"מסלול GPS - {dt_str}")
-                            ax.set_xlabel("Longitude (°)")
-                            ax.set_ylabel("Latitude (°)")
-                            ax.grid(True, linestyle='--', alpha=0.5)
-                            st.pyplot(fig)
+                            center_lat = sum(lats) / len(lats)
+                            center_lon = sum(lons) / len(lons)
+                            
+                            m_ind = folium.Map(location=[center_lat, center_lon], zoom_start=14, tiles="OpenStreetMap")
+                            folium.PolyLine(coords, color='blue', weight=4, opacity=0.85, tooltip=f"Workout: {dt_str}").add_to(m_ind)
+                            
+                            st.subheader(f"Route Map - {dt_str}")
+                            st_folium(m_ind, width=700, height=450, key=f"folium_map_{i}")
                     else:
-                        st.warning("לא נמצאו נתוני GPS בקובץ זה.")
+                        st.warning("No GPS data found in this file.")
 
-                # כפתור 3: נתונים סטטיסטיים
-                if col3.button(f"📊 נתוני אימון", key=f"stats_{i}"):
+                # 3. Workout Statistics
+                if col3.button(f"📊 Session Stats", key=f"stats_{i}"):
                     df = w['df']
                     duration = (df['timestamp'].iloc[-1] - df['timestamp'].iloc[0]).total_seconds() / 60
                     max_speed = df['speed_kmh'].max() if 'speed_kmh' in df.columns else 0
                     avg_hr = df['heart_rate'].mean() if 'heart_rate' in df.columns else 0
                     
-                    st.write(f"⏱️ **משך אימון:** {duration:.1f} דקות")
-                    st.write(f"🚀 **מהירות שיא:** {max_speed:.2f} קמ\"ש")
-                    st.write(f"❤️ **דופק ממוצע:** {avg_hr:.0f} bpm")
+                    st.write(f"⏱️ **Duration:** {duration:.1f} min")
+                    st.write(f"🚀 **Max Speed:** {max_speed:.2f} km/h")
+                    st.write(f"❤️ **Avg Heart Rate:** {avg_hr:.0f} bpm")
