@@ -19,14 +19,16 @@ st.write("Analyze your workouts either by connecting directly to Garmin Connect 
 # Initialize session state for workouts persistence across re-runs
 if 'workouts' not in st.session_state:
     st.session_state.workouts = []
+if 'available_activities' not in st.session_state:
+    st.session_state.available_activities = []
+if 'garmin_client' not in st.session_state:
+    st.session_state.garmin_client = None
 
 # Sidebar for Garmin Connect Login
 st.sidebar.header("🔐 Garmin Connect Login")
 email = st.sidebar.text_input("Garmin Email")
 password = st.sidebar.text_input("Garmin Password", type="password")
-fetch_btn = st.sidebar.button("Fetch Recent Workouts")
-
-uploaded_files = st.file_uploader("Or Upload FIT/GPX Files Manually", type=["fit", "FIT", "gpx", "GPX"], accept_multiple_files=True)
+login_btn = st.sidebar.button("Connect & List Workouts")
 
 def parse_fit_file(file_bytes):
     fitfile = fitparse.FitFile(file_bytes)
@@ -90,20 +92,47 @@ def parse_gpx_file(file_bytes):
         
     return df
 
-# Fetch directly from Garmin Connect if requested
-if fetch_btn:
+# Connect to Garmin & Fetch list of last 10 activities
+if login_btn:
     if email and password:
         try:
             with st.spinner("Connecting to Garmin Connect..."):
                 client = Garmin(email, password)
                 client.login()
-                activities = client.get_activities(0, 5) # Fetch last 5 activities
-                
-                fetched_workouts = []
-                for act in activities:
-                    act_id = act['activityId']
+                st.session_state.garmin_client = client
+                activities = client.get_activities(0, 10) # Fetch last 10 activities
+                st.session_state.available_activities = activities
+                st.sidebar.success(f"Connected! Found {len(activities)} recent workouts.")
+        except Exception as e:
+            st.sidebar.error(f"Login failed: {e}")
+    else:
+        st.sidebar.warning("Please enter your email and password.")
+
+# Selection box for activities
+if st.session_state.available_activities:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Select Workouts to Analyze")
+    
+    options = {}
+    for act in st.session_state.available_activities:
+        act_id = act['activityId']
+        act_name = act.get('activityName', 'Workout')
+        start_time_str = act.get('startTimeLocal', '')
+        options[f"{start_time_str} - {act_name} ({act_id})"] = act
+        
+    selected_options = st.sidebar.multiselect("Choose Workouts", list(options.keys()), default=list(options.keys())[:3])
+    download_btn = st.sidebar.button("Download & Analyze Selected")
+
+    if download_btn and selected_options:
+        client = st.session_state.garmin_client
+        fetched_workouts = []
+        
+        with st.spinner("Downloading selected FIT files..."):
+            for opt_key in selected_options:
+                act = options[opt_key]
+                act_id = act['activityId']
+                try:
                     raw_data = client.download_activity(act_id, dl_fmt=client.ActivityDownloadFormat.ORIGINAL)
-                    
                     fit_data = raw_data
                     try:
                         with zipfile.ZipFile(io.BytesIO(raw_data)) as z:
@@ -124,14 +153,15 @@ if fetch_btn:
                             'start_time': start_time,
                             'df': df
                         })
-                st.session_state.workouts = fetched_workouts
-            st.sidebar.success(f"Successfully loaded {len(st.session_state.workouts)} workouts from Garmin Connect!")
-        except Exception as e:
-            st.sidebar.error(f"Login or download failed: {e}")
-    else:
-        st.sidebar.warning("Please enter your email and password.")
+                except Exception as e:
+                    st.error(f"Error downloading workout {act_id}: {e}")
+                    
+        st.session_state.workouts = fetched_workouts
+        st.success(f"Successfully loaded {len(fetched_workouts)} workout(s)!")
 
-# Parse manually uploaded files if provided
+uploaded_files = st.file_uploader("Or Upload FIT/GPX Files Manually", type=["fit", "FIT", "gpx", "GPX"], accept_multiple_files=True)
+
+# Parse manually uploaded files
 if uploaded_files:
     uploaded_workouts = []
     for f in uploaded_files:
@@ -183,7 +213,7 @@ if workouts:
         st.session_state.show_comp_map = not st.session_state.show_comp_map
 
     if st.session_state.show_comp_hr:
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = plt.subplots(figsize=(8, 4))
         has_hr = False
         for w in workouts:
             df = w['df']
@@ -192,28 +222,30 @@ if workouts:
                 ax.plot(df['elapsed_min'], df['heart_rate'], label=label_str, alpha=0.8, linewidth=1.5)
                 has_hr = True
         if has_hr:
-            ax.set_title("Heart Rate Comparison Over Time", fontsize=12)
-            ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
-            ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
+            ax.set_title("Heart Rate Comparison Over Time", fontsize=11)
+            ax.set_xlabel("Elapsed Time (min)", fontsize=9)
+            ax.set_ylabel("Heart Rate (bpm)", fontsize=9)
             ax.grid(True, linestyle='--', alpha=0.5)
             ax.legend(loc='best', fontsize='small')
-            st.pyplot(fig)
+            plt.tight_layout()
+            st.pyplot(fig, use_container_width=True)
         else:
             st.warning("No Heart Rate data found in the workouts.")
 
     if st.session_state.show_comp_speed:
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = plt.subplots(figsize=(8, 4))
         for w in workouts:
             df = w['df']
             if 'speed_kmh' in df.columns and not df['speed_kmh'].dropna().empty:
                 label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
                 ax.plot(df['elapsed_min'], df['speed_kmh'], label=label_str, alpha=0.8, linewidth=1.5)
-        ax.set_title("Speed Comparison Over Time", fontsize=12)
-        ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
-        ax.set_ylabel("Speed (km/h)", fontsize=10)
+        ax.set_title("Speed Comparison Over Time", fontsize=11)
+        ax.set_xlabel("Elapsed Time (min)", fontsize=9)
+        ax.set_ylabel("Speed (km/h)", fontsize=9)
         ax.grid(True, linestyle='--', alpha=0.5)
         ax.legend(loc='best', fontsize='small')
-        st.pyplot(fig)
+        plt.tight_layout()
+        st.pyplot(fig, use_container_width=True)
 
     if st.session_state.show_comp_map:
         gps_tracks = []
@@ -244,7 +276,7 @@ if workouts:
             m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=(15, 15))
             
             st.subheader("All Workout Routes on Interactive Real Map")
-            st_folium(m, width=900, height=500, key="combined_map")
+            st_folium(m, use_container_width=True, height=400, key="combined_map")
         else:
             st.warning("No GPS data found in workouts.")
 
@@ -266,33 +298,34 @@ if workouts:
             if key_map not in st.session_state: st.session_state[key_map] = False
             if key_stats not in st.session_state: st.session_state[key_stats] = False
 
-            if col1.button(f"📈 HR & Speed Chart", key=f"btn_hr_{i}"):
+            if col1.button(f"📈 HR & Speed", key=f"btn_hr_{i}"):
                 st.session_state[key_hr] = not st.session_state[key_hr]
 
-            if col2.button(f"🗺️ Real Map Route", key=f"btn_map_{i}"):
+            if col2.button(f"🗺️ Map Route", key=f"btn_map_{i}"):
                 st.session_state[key_map] = not st.session_state[key_map]
 
-            if col3.button(f"📊 Session Stats", key=f"btn_stats_{i}"):
+            if col3.button(f"📊 Stats", key=f"btn_stats_{i}"):
                 st.session_state[key_stats] = not st.session_state[key_stats]
 
             if st.session_state[key_hr]:
                 df = w['df']
-                fig, ax1 = plt.subplots(figsize=(10, 4))
+                fig, ax1 = plt.subplots(figsize=(8, 3.5))
                 
                 if 'heart_rate' in df.columns and df['heart_rate'].notna().any():
                     ax1.plot(df['elapsed_min'], df['heart_rate'], color='red', label='Heart Rate (bpm)', linewidth=1.2)
-                    ax1.set_ylabel('Heart Rate (bpm)', color='red')
-                    ax1.set_xlabel('Elapsed Time (min)')
+                    ax1.set_ylabel('Heart Rate (bpm)', color='red', fontsize=9)
+                    ax1.set_xlabel('Elapsed Time (min)', fontsize=9)
                 else:
-                    ax1.set_xlabel('Elapsed Time (min)')
+                    ax1.set_xlabel('Elapsed Time (min)', fontsize=9)
                 
                 if 'speed_kmh' in df.columns and df['speed_kmh'].max() > 0:
                     ax2 = ax1.twinx()
                     ax2.plot(df['elapsed_min'], df['speed_kmh'], color='blue', alpha=0.6, label='Speed (km/h)', linewidth=1.2)
-                    ax2.set_ylabel('Speed (km/h)', color='blue')
+                    ax2.set_ylabel('Speed (km/h)', color='blue', fontsize=9)
                     
-                plt.title(f"Heart Rate & Speed - {dt_str}")
-                st.pyplot(fig)
+                plt.title(f"Heart Rate & Speed - {dt_str}", fontsize=10)
+                plt.tight_layout()
+                st.pyplot(fig, use_container_width=True)
 
             if st.session_state[key_map]:
                 df = w['df']
@@ -311,7 +344,7 @@ if workouts:
                         m_ind.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=(15, 15))
                         
                         st.subheader(f"Route Map - {dt_str}")
-                        st_folium(m_ind, width=700, height=450, key=f"ind_map_{i}")
+                        st_folium(m_ind, use_container_width=True, height=350, key=f"ind_map_{i}")
                 else:
                     st.warning("No GPS data found in this file.")
 
