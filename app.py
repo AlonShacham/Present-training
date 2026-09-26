@@ -16,6 +16,10 @@ st.set_page_config(page_title="Garmin Workout Analyzer", layout="wide")
 st.title("🏃‍♂️ Garmin Workout Analyzer")
 st.write("Analyze your workouts either by connecting directly to Garmin Connect or by uploading FIT/GPX files manually.")
 
+# Initialize session state for workouts persistence across re-runs
+if 'workouts' not in st.session_state:
+    st.session_state.workouts = []
+
 # Sidebar for Garmin Connect Login
 st.sidebar.header("🔐 Garmin Connect Login")
 email = st.sidebar.text_input("Garmin Email")
@@ -86,8 +90,6 @@ def parse_gpx_file(file_bytes):
         
     return df
 
-workouts = []
-
 # Fetch directly from Garmin Connect if requested
 if fetch_btn:
     if email and password:
@@ -97,18 +99,18 @@ if fetch_btn:
                 client.login()
                 activities = client.get_activities(0, 5) # Fetch last 5 activities
                 
+                fetched_workouts = []
                 for act in activities:
                     act_id = act['activityId']
                     raw_data = client.download_activity(act_id, dl_fmt=client.ActivityDownloadFormat.ORIGINAL)
                     
-                    # Unzip downloaded archive if needed
                     fit_data = raw_data
                     try:
                         with zipfile.ZipFile(io.BytesIO(raw_data)) as z:
                             fit_filename = [name for name in z.namelist() if name.lower().endswith('.fit')][0]
                             fit_data = z.read(fit_filename)
                     except zipfile.BadZipFile:
-                        pass # Not a zip archive, process raw bytes directly
+                        pass
 
                     df = parse_fit_file(fit_data)
                     if not df.empty and 'timestamp' in df.columns:
@@ -116,20 +118,22 @@ if fetch_btn:
                         df['elapsed_sec'] = (df['timestamp'] - start_time).dt.total_seconds()
                         df['elapsed_min'] = df['elapsed_sec'] / 60.0
                         
-                        workouts.append({
+                        fetched_workouts.append({
                             'filename': f"{act_id}.fit",
                             'act_id': str(act_id),
                             'start_time': start_time,
                             'df': df
                         })
-            st.sidebar.success(f"Successfully loaded {len(workouts)} workouts from Garmin Connect!")
+                st.session_state.workouts = fetched_workouts
+            st.sidebar.success(f"Successfully loaded {len(st.session_state.workouts)} workouts from Garmin Connect!")
         except Exception as e:
             st.sidebar.error(f"Login or download failed: {e}")
     else:
         st.sidebar.warning("Please enter your email and password.")
 
-# Parse manually uploaded files
+# Parse manually uploaded files if provided
 if uploaded_files:
+    uploaded_workouts = []
     for f in uploaded_files:
         try:
             fn_lower = f.name.lower()
@@ -144,7 +148,7 @@ if uploaded_files:
                 df['elapsed_sec'] = (df['timestamp'] - start_time).dt.total_seconds()
                 df['elapsed_min'] = df['elapsed_sec'] / 60.0
                 
-                workouts.append({
+                uploaded_workouts.append({
                     'filename': f.name,
                     'act_id': act_id,
                     'start_time': start_time,
@@ -152,6 +156,10 @@ if uploaded_files:
                 })
         except Exception as e:
             st.error(f"Error parsing file {f.name}: {e}")
+    if uploaded_workouts:
+        st.session_state.workouts = uploaded_workouts
+
+workouts = st.session_state.workouts
 
 if workouts:
     workouts = sorted(workouts, key=lambda x: x['start_time'])
