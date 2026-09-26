@@ -8,12 +8,13 @@ import matplotlib.pyplot as plt
 import folium
 from streamlit_folium import st_folium
 from garminconnect import Garmin
+import zipfile
 import io
 
 st.set_page_config(page_title="Garmin Workout Analyzer", layout="wide")
 
 st.title("🏃‍♂️ Garmin Workout Analyzer")
-st.write("Analyze your workouts either by connecting directly to Garmin Connect or by uploading FIT/GPX files.")
+st.write("Analyze your workouts either by connecting directly to Garmin Connect or by uploading FIT/GPX files manually.")
 
 # Sidebar for Garmin Connect Login
 st.sidebar.header("🔐 Garmin Connect Login")
@@ -35,7 +36,7 @@ def parse_fit_file(file_bytes):
     
     if 'timestamp' in df.columns:
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=3) # Israel Time
+        df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=3) # Israel Time (UTC+3)
     
     if 'enhanced_speed' in df.columns and df['enhanced_speed'].notna().any():
         df['speed_kmh'] = df['enhanced_speed'] * 3.6
@@ -98,10 +99,23 @@ if fetch_btn:
                 
                 for act in activities:
                     act_id = act['activityId']
-                    fit_data = client.download_activity(act_id, dl_fmt=client.ActivityDownloadFormat.ORIGINAL)
+                    raw_data = client.download_activity(act_id, dl_fmt=client.ActivityDownloadFormat.ORIGINAL)
+                    
+                    # Unzip downloaded archive if needed
+                    fit_data = raw_data
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(raw_data)) as z:
+                            fit_filename = [name for name in z.namelist() if name.lower().endswith('.fit')][0]
+                            fit_data = z.read(fit_filename)
+                    except zipfile.BadZipFile:
+                        pass # Not a zip archive, process raw bytes directly
+
                     df = parse_fit_file(fit_data)
                     if not df.empty and 'timestamp' in df.columns:
                         start_time = df['timestamp'].iloc[0]
+                        df['elapsed_sec'] = (df['timestamp'] - start_time).dt.total_seconds()
+                        df['elapsed_min'] = df['elapsed_sec'] / 60.0
+                        
                         workouts.append({
                             'filename': f"{act_id}.fit",
                             'act_id': str(act_id),
