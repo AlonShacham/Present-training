@@ -13,7 +13,7 @@ st.set_page_config(page_title="Garmin Workout Analyzer", layout="wide")
 st.title("🏃‍♂️ Garmin Workout Analyzer (FIT & GPX Files)")
 st.write("Upload your Garmin FIT or GPX files to view workout summaries, general comparison charts, or individual session analysis with interactive real maps.")
 
-# File uploader with GPX support
+# File uploader
 uploaded_files = st.file_uploader("Choose FIT or GPX Files", type=["fit", "FIT", "gpx", "GPX"], accept_multiple_files=True)
 
 def parse_fit_file(file_bytes):
@@ -30,7 +30,6 @@ def parse_fit_file(file_bytes):
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=3) # Israel Time (UTC+3)
     
-    # Extract speed reliably
     if 'enhanced_speed' in df.columns and df['enhanced_speed'].notna().any():
         df['speed_kmh'] = df['enhanced_speed'] * 3.6
     elif 'speed' in df.columns and df['speed'].notna().any():
@@ -50,7 +49,7 @@ def parse_gpx_file(file_bytes):
             for pt in segment.points:
                 records.append({
                     'timestamp': pd.to_datetime(pt.time) + pd.Timedelta(hours=3) if pt.time else None,
-                    'position_lat': pt.latitude * (2**31 / 180.0), # normalize to same unit as FIT parser
+                    'position_lat': pt.latitude * (2**31 / 180.0),
                     'position_long': pt.longitude * (2**31 / 180.0),
                     'lat': pt.latitude,
                     'lon': pt.longitude,
@@ -61,7 +60,6 @@ def parse_gpx_file(file_bytes):
     df = pd.DataFrame(records)
     if not df.empty and 'timestamp' in df.columns and df['timestamp'].notna().any():
         df = df.dropna(subset=['timestamp']).reset_index(drop=True)
-        # Calculate speed if missing from raw GPX points
         if 'speed' in df.columns and df['speed'].notna().any():
             df['speed_kmh'] = df['speed'] * 3.6
         else:
@@ -179,13 +177,17 @@ if uploaded_files:
             if gps_tracks:
                 all_lats = [pt[0] for track in gps_tracks for pt in track[1]]
                 all_lons = [pt[1] for track in gps_tracks for pt in track[1]]
-                center_lat = sum(all_lats) / len(all_lats)
-                center_lon = sum(all_lons) / len(all_lons)
                 
-                m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles="OpenStreetMap")
+                min_lat, max_lat = min(all_lats), max(all_lats)
+                min_lon, max_lon = min(all_lons), max(all_lons)
+                
+                m = folium.Map(tiles="OpenStreetMap")
                 for idx, (label, coords) in enumerate(gps_tracks):
                     color = colors[idx % len(colors)]
                     folium.PolyLine(coords, color=color, weight=3.5, opacity=0.85, popup=label, tooltip=label).add_to(m)
+                
+                # Fit bounds tightly to all points
+                m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=(15, 15))
                 
                 st.subheader("All Workout Routes on Interactive Real Map")
                 st_folium(m, width=900, height=500, key="combined_map")
@@ -247,11 +249,12 @@ if uploaded_files:
                             lons = (map_df['position_long'] * (180 / 2**31)).tolist()
                             coords = list(zip(lats, lons))
                             
-                            center_lat = sum(lats) / len(lats)
-                            center_lon = sum(lons) / len(lons)
+                            min_lat, max_lat = min(lats), max(lats)
+                            min_lon, max_lon = min(lons), max(lons)
                             
-                            m_ind = folium.Map(location=[center_lat, center_lon], zoom_start=14, tiles="OpenStreetMap")
+                            m_ind = folium.Map(tiles="OpenStreetMap")
                             folium.PolyLine(coords, color='blue', weight=4, opacity=0.85, tooltip=f"Workout: {dt_str}").add_to(m_ind)
+                            m_ind.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=(15, 15))
                             
                             st.subheader(f"Route Map - {dt_str}")
                             st_folium(m_ind, width=700, height=450, key=f"ind_map_{i}")
