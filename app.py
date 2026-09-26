@@ -3,17 +3,18 @@ import pandas as pd
 import numpy as np
 import datetime
 import fitparse
+import gpxpy
 import matplotlib.pyplot as plt
 import folium
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Garmin Workout Analyzer", layout="wide")
 
-st.title("🏃‍♂️ Garmin Workout Analyzer (FIT Files)")
-st.write("Upload your Garmin FIT files to view workout summaries, general comparison charts, or individual session analysis with interactive real maps.")
+st.title("🏃‍♂️ Garmin Workout Analyzer (FIT & GPX Files)")
+st.write("Upload your Garmin FIT or GPX files to view workout summaries, general comparison charts, or individual session analysis with interactive real maps.")
 
-# File uploader
-uploaded_files = st.file_uploader("Choose FIT Files", type=["fit", "FIT"], accept_multiple_files=True)
+# File uploader with GPX support
+uploaded_files = st.file_uploader("Choose FIT or GPX Files", type=["fit", "FIT", "gpx", "GPX"], accept_multiple_files=True)
 
 def parse_fit_file(file_bytes):
     fitfile = fitparse.FitFile(file_bytes)
@@ -29,11 +30,51 @@ def parse_fit_file(file_bytes):
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=3) # Israel Time (UTC+3)
     
-    # Extract speed reliably (check 'enhanced_speed' first, then 'speed')
+    # Extract speed reliably
     if 'enhanced_speed' in df.columns and df['enhanced_speed'].notna().any():
         df['speed_kmh'] = df['enhanced_speed'] * 3.6
     elif 'speed' in df.columns and df['speed'].notna().any():
         df['speed_kmh'] = df['speed'] * 3.6
+    else:
+        df['speed_kmh'] = 0.0
+        
+    return df
+
+def parse_gpx_file(file_bytes):
+    gpx_text = file_bytes.decode('utf-8', errors='ignore')
+    gpx = gpxpy.parse(gpx_text)
+    
+    records = []
+    for track in gpx.tracks:
+        for segment in track.segments:
+            for pt in segment.points:
+                records.append({
+                    'timestamp': pd.to_datetime(pt.time) + pd.Timedelta(hours=3) if pt.time else None,
+                    'position_lat': pt.latitude * (2**31 / 180.0), # normalize to same unit as FIT parser
+                    'position_long': pt.longitude * (2**31 / 180.0),
+                    'lat': pt.latitude,
+                    'lon': pt.longitude,
+                    'elevation': pt.elevation,
+                    'speed': pt.speed
+                })
+                
+    df = pd.DataFrame(records)
+    if not df.empty and 'timestamp' in df.columns and df['timestamp'].notna().any():
+        df = df.dropna(subset=['timestamp']).reset_index(drop=True)
+        # Calculate speed if missing from raw GPX points
+        if 'speed' in df.columns and df['speed'].notna().any():
+            df['speed_kmh'] = df['speed'] * 3.6
+        else:
+            df['lat_rad'] = np.radians(df['lat'])
+            df['lon_rad'] = np.radians(df['lon'])
+            dlat = df['lat_rad'].diff()
+            dlon = df['lon_rad'].diff()
+            a = np.sin(dlat/2)**2 + np.cos(df['lat_rad'].shift()) * np.cos(df['lat_rad']) * np.sin(dlon/2)**2
+            c = 2 * np.arcsin(np.sqrt(a))
+            dist_m = c * 6371000.0
+            dt_sec = df['timestamp'].diff().dt.total_seconds()
+            df['speed_kmh'] = (dist_m / dt_sec) * 3.6
+            df['speed_kmh'] = df['speed_kmh'].fillna(0).clip(lower=0, upper=80)
     else:
         df['speed_kmh'] = 0.0
         
@@ -46,11 +87,15 @@ if uploaded_files:
     
     for f in uploaded_files:
         try:
-            df = parse_fit_file(f.getvalue())
+            fn_lower = f.name.lower()
+            if fn_lower.endswith('.gpx'):
+                df = parse_gpx_file(f.getvalue())
+            else:
+                df = parse_fit_file(f.getvalue())
+                
             if not df.empty and 'timestamp' in df.columns:
                 start_time = df['timestamp'].iloc[0]
-                act_id = f.name.split('_')[0]
-                # Elapsed time calculations
+                act_id = f.name.split('.')[0].split('_')[0]
                 df['elapsed_sec'] = (df['timestamp'] - start_time).dt.total_seconds()
                 df['elapsed_min'] = df['elapsed_sec'] / 60.0
                 
@@ -64,7 +109,6 @@ if uploaded_files:
             st.error(f"Error parsing file {f.name}: {e}")
 
     if workouts:
-        # Chronological sort
         workouts = sorted(workouts, key=lambda x: x['start_time'])
 
         st.markdown("---")
@@ -72,7 +116,6 @@ if uploaded_files:
         
         col_gen1, col_gen2, col_gen3 = st.columns(3)
         
-        # Initialize session states for comparative view
         if 'show_comp_hr' not in st.session_state: st.session_state.show_comp_hr = False
         if 'show_comp_speed' not in st.session_state: st.session_state.show_comp_speed = False
         if 'show_comp_map' not in st.session_state: st.session_state.show_comp_map = False
@@ -86,20 +129,24 @@ if uploaded_files:
         if col_gen3.button("🗺️ Combined GPS Route Map"):
             st.session_state.show_comp_map = not st.session_state.show_comp_map
 
-        # Render Comparative Charts based on State
         if st.session_state.show_comp_hr:
             fig, ax = plt.subplots(figsize=(10, 4))
+            has_hr = False
             for w in workouts:
                 df = w['df']
                 if 'heart_rate' in df.columns and not df['heart_rate'].dropna().empty:
                     label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
                     ax.plot(df['elapsed_min'], df['heart_rate'], label=label_str, alpha=0.8, linewidth=1.5)
-            ax.set_title("Heart Rate Comparison Over Time", fontsize=12)
-            ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
-            ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
-            ax.grid(True, linestyle='--', alpha=0.5)
-            ax.legend(loc='best', fontsize='small')
-            st.pyplot(fig)
+                    has_hr = True
+            if has_hr:
+                ax.set_title("Heart Rate Comparison Over Time", fontsize=12)
+                ax.set_xlabel("Elapsed Time (minutes)", fontsize=10)
+                ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.legend(loc='best', fontsize='small')
+                st.pyplot(fig)
+            else:
+                st.warning("No Heart Rate data found in the uploaded files.")
 
         if st.session_state.show_comp_speed:
             fig, ax = plt.subplots(figsize=(10, 4))
@@ -150,11 +197,11 @@ if uploaded_files:
 
         for i, w in enumerate(workouts):
             dt_str = w['start_time'].strftime('%Y-%m-%d at %H:%M')
+            file_ext = w['filename'].split('.')[-1].upper()
             
-            with st.expander(f"📌 Workout {i+1}: {dt_str} (ID: {w['act_id']})"):
+            with st.expander(f"📌 Workout {i+1}: {dt_str} (ID: {w['act_id']}) [{file_ext}]"):
                 col1, col2, col3 = st.columns(3)
                 
-                # Session state keys for individual workouts
                 key_hr = f"view_hr_{i}"
                 key_map = f"view_map_{i}"
                 key_stats = f"view_stats_{i}"
@@ -172,14 +219,15 @@ if uploaded_files:
                 if col3.button(f"📊 Session Stats", key=f"btn_stats_{i}"):
                     st.session_state[key_stats] = not st.session_state[key_stats]
 
-                # Render Individual Items
                 if st.session_state[key_hr]:
                     df = w['df']
                     fig, ax1 = plt.subplots(figsize=(10, 4))
                     
-                    if 'heart_rate' in df.columns:
+                    if 'heart_rate' in df.columns and df['heart_rate'].notna().any():
                         ax1.plot(df['elapsed_min'], df['heart_rate'], color='red', label='Heart Rate (bpm)', linewidth=1.2)
                         ax1.set_ylabel('Heart Rate (bpm)', color='red')
+                        ax1.set_xlabel('Elapsed Time (min)')
+                    else:
                         ax1.set_xlabel('Elapsed Time (min)')
                     
                     if 'speed_kmh' in df.columns and df['speed_kmh'].max() > 0:
@@ -214,8 +262,11 @@ if uploaded_files:
                     df = w['df']
                     duration = (df['timestamp'].iloc[-1] - df['timestamp'].iloc[0]).total_seconds() / 60
                     max_speed = df['speed_kmh'].max() if 'speed_kmh' in df.columns else 0
-                    avg_hr = df['heart_rate'].mean() if 'heart_rate' in df.columns else 0
+                    avg_hr = df['heart_rate'].mean() if 'heart_rate' in df.columns and df['heart_rate'].notna().any() else None
                     
                     st.write(f"⏱️ **Duration:** {duration:.1f} min")
                     st.write(f"🚀 **Max Speed:** {max_speed:.2f} km/h")
-                    st.write(f"❤️ **Avg Heart Rate:** {avg_hr:.0f} bpm")
+                    if avg_hr is not None:
+                        st.write(f"❤️ **Avg Heart Rate:** {avg_hr:.0f} bpm")
+                    else:
+                        st.write("❤️ **Avg Heart Rate:** N/A")
