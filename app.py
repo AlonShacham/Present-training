@@ -359,9 +359,10 @@ with tab1:
                 ))
         fig_hr.update_layout(
             template="plotly_dark", paper_bgcolor="#161B22", plot_bgcolor="#161B22",
-            xaxis_title="Elapsed Time (min)", yaxis_title="Heart Rate (bpm)",
             margin=dict(l=20, r=20, t=30, b=20), hovermode="x unified"
         )
+        fig_hr.update_xaxes(title_text="Elapsed Time (min)")
+        fig_hr.update_yaxes(title_text="Heart Rate (bpm)")
         st.plotly_chart(fig_hr, use_container_width=True)
 
         # 2. Comparative Speed Plotly
@@ -378,9 +379,10 @@ with tab1:
                 ))
         fig_sp.update_layout(
             template="plotly_dark", paper_bgcolor="#161B22", plot_bgcolor="#161B22",
-            xaxis_title="Elapsed Time (min)", yaxis_title="Speed (km/h)",
             margin=dict(l=20, r=20, t=30, b=20), hovermode="x unified"
         )
+        fig_sp.update_xaxes(title_text="Elapsed Time (min)")
+        fig_sp.update_yaxes(title_text="Speed (km/h)")
         st.plotly_chart(fig_sp, use_container_width=True)
 
         # 3. Comparative Speed vs. Incline Grade (%) Scatter
@@ -402,9 +404,10 @@ with tab1:
         if has_inc:
             fig_inc.update_layout(
                 template="plotly_dark", paper_bgcolor="#161B22", plot_bgcolor="#161B22",
-                xaxis_title="Incline / Slope Grade (%)", yaxis_title="Running Speed (km/h)",
                 margin=dict(l=20, r=20, t=30, b=20)
             )
+            fig_inc.update_xaxes(title_text="Incline / Slope Grade (%)")
+            fig_inc.update_yaxes(title_text="Running Speed (km/h)")
             st.plotly_chart(fig_inc, use_container_width=True)
         else:
             st.info("No running incline data available across workouts.")
@@ -466,7 +469,7 @@ with tab2:
 
                 st.markdown("---")
                 
-                # Dual Axis Plotly Chart (HR & Speed)
+                # Dual Axis Plotly Chart (HR & Speed) - FIXED Plotly Update Method
                 fig_ind = go.Figure()
                 if 'heart_rate' in df.columns:
                     fig_ind.add_trace(go.Scatter(
@@ -484,10 +487,18 @@ with tab2:
                 fig_ind.update_layout(
                     template="plotly_dark", paper_bgcolor="#161B22", plot_bgcolor="#161B22",
                     title=f"Heart Rate & Speed Profile - {dt_str}",
-                    xaxis=dict(title="Elapsed Time (min)"),
-                    yaxis=dict(title="Heart Rate (bpm)", titlefont=dict(color=COLOR_HR), tickfont=dict(color=COLOR_HR)),
-                    yaxis2=dict(title="Speed (km/h)", titlefont=dict(color=COLOR_SPEED), tickfont=dict(color=COLOR_SPEED), overlaying="y", side="right"),
                     margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified"
+                )
+                fig_ind.update_xaxes(title_text="Elapsed Time (min)")
+                fig_ind.update_yaxes(title_text="Heart Rate (bpm)", titlefont=dict(color=COLOR_HR), tickfont=dict(color=COLOR_HR), secondary_y=False)
+                fig_ind.update_layout(
+                    yaxis2=dict(
+                        title="Speed (km/h)",
+                        titlefont=dict(color=COLOR_SPEED),
+                        tickfont=dict(color=COLOR_SPEED),
+                        overlaying="y",
+                        side="right"
+                    )
                 )
                 st.plotly_chart(fig_ind, use_container_width=True)
 
