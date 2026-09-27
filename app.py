@@ -11,6 +11,7 @@ import zipfile
 import io
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 
 # --- Page Config & Modern Dark Theme Custom CSS ---
 st.set_page_config(
@@ -466,29 +467,37 @@ with tab2:
 
                 st.markdown("---")
                 
-                # Dual Axis Plotly Chart (HR & Speed) - Clean Native Layout Implementation
-                fig_ind = go.Figure()
+                # Dual Axis Plotly Chart via make_subplots
+                fig_ind = make_subplots(specs=[[{"secondary_y": True}]])
+                
                 if 'heart_rate' in df.columns:
-                    fig_ind.add_trace(go.Scatter(
-                        x=df['elapsed_min'], y=df['heart_rate'],
-                        name="Heart Rate (bpm)", line=dict(color=COLOR_HR, width=1.5),
-                        hovertemplate="HR: %{y:.0f} bpm<extra></extra>"
-                    ))
+                    fig_ind.add_trace(
+                        go.Scatter(
+                            x=df['elapsed_min'], y=df['heart_rate'],
+                            name="Heart Rate (bpm)", line=dict(color=COLOR_HR, width=1.5),
+                            hovertemplate="HR: %{y:.0f} bpm<extra></extra>"
+                        ),
+                        secondary_y=False
+                    )
                 if 'speed_kmh' in df.columns:
-                    fig_ind.add_trace(go.Scatter(
-                        x=df['elapsed_min'], y=df['speed_kmh'],
-                        name="Speed (km/h)", line=dict(color=COLOR_SPEED, width=1.5), yaxis="y2",
-                        hovertemplate="Speed: %{y:.1f} km/h<extra></extra>"
-                    ))
+                    fig_ind.add_trace(
+                        go.Scatter(
+                            x=df['elapsed_min'], y=df['speed_kmh'],
+                            name="Speed (km/h)", line=dict(color=COLOR_SPEED, width=1.5),
+                            hovertemplate="Speed: %{y:.1f} km/h<extra></extra>"
+                        ),
+                        secondary_y=True
+                    )
                 
                 fig_ind.update_layout(
                     template="plotly_dark", paper_bgcolor="#161B22", plot_bgcolor="#161B22",
                     title=f"Heart Rate & Speed Profile - {dt_str}",
-                    margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified",
-                    xaxis=dict(title="Elapsed Time (min)"),
-                    yaxis=dict(title="Heart Rate (bpm)", titlefont=dict(color=COLOR_HR), tickfont=dict(color=COLOR_HR)),
-                    yaxis2=dict(title="Speed (km/h)", titlefont=dict(color=COLOR_SPEED), tickfont=dict(color=COLOR_SPEED), overlaying="y", side="right")
+                    margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified"
                 )
+                fig_ind.update_xaxes(title_text="Elapsed Time (min)")
+                fig_ind.update_yaxes(title_text="Heart Rate (bpm)", titlefont=dict(color=COLOR_HR), tickfont=dict(color=COLOR_HR), secondary_y=False)
+                fig_ind.update_yaxes(title_text="Speed (km/h)", titlefont=dict(color=COLOR_SPEED), tickfont=dict(color=COLOR_SPEED), secondary_y=True)
+                
                 st.plotly_chart(fig_ind, use_container_width=True)
 
                 col_map, col_scatter = st.columns(2)
