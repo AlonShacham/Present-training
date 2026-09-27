@@ -93,6 +93,8 @@ COLOR_SPEED = "#00D2FF"     # Electric Cyan
 COLOR_INCLINE = "#A855F7"   # Violet
 COLOR_RUN = "#10B981"       # Emerald Green
 COLOR_WALK = "#F59E0B"      # Amber Yellow
+DARK_MAP_TILES = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+MAP_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 
 # --- Helper Functions & Analytics ---
 def calculate_distance_and_incline(df):
@@ -429,7 +431,7 @@ with tab1:
             all_lats = [pt[0] for track in gps_tracks for pt in track[1]]
             all_lons = [pt[1] for track in gps_tracks for pt in track[1]]
             
-            m = folium.Map(tiles="CartoDB dark_matter")
+            m = folium.Map(tiles=DARK_MAP_TILES, attr=MAP_ATTR)
             for idx, (label, coords) in enumerate(gps_tracks):
                 color = colors[idx % len(colors)]
                 folium.PolyLine(coords, color=color, weight=3.5, opacity=0.85, popup=label, tooltip=label).add_to(m)
@@ -512,7 +514,7 @@ with tab2:
                             lons = (map_df['position_long'] * (180 / 2**31)).tolist()
                             coords = list(zip(lats, lons))
                             
-                            m_ind = folium.Map(tiles="CartoDB dark_matter")
+                            m_ind = folium.Map(tiles=DARK_MAP_TILES, attr=MAP_ATTR)
                             folium.PolyLine(coords, color=COLOR_SPEED, weight=4, opacity=0.9).add_to(m_ind)
                             m_ind.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(15, 15))
                             st_folium(m_ind, use_container_width=True, height=350, key=f"ind_map_{i}")
