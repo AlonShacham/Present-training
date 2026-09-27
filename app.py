@@ -33,6 +33,44 @@ login_btn = st.sidebar.button("Connect & List Workouts")
 # Speed threshold for running vs. walking
 RUN_SPEED_THRESHOLD_KMH = 6.5
 
+def calculate_distance_and_incline(df):
+    """Calculates cumulative distance and smoothed incline grade (%) using a rolling window."""
+    if 'position_lat' in df.columns and 'position_long' in df.columns:
+        lats = np.radians(df['position_lat'] * (180 / 2**31))
+        lons = np.radians(df['position_long'] * (180 / 2**31))
+    elif 'lat' in df.columns and 'lon' in df.columns:
+        lats = np.radians(df['lat'])
+        lons = np.radians(df['lon'])
+    else:
+        df['incline_pct'] = np.nan
+        return df
+
+    # Haversine formula for step distance
+    dlat = lats.diff()
+    dlon = lons.diff()
+    a = np.sin(dlat/2)**2 + np.cos(lats.shift()) * np.cos(lats) * np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    dist_step_m = c * 6371000.0
+    df['dist_m'] = dist_step_m.fillna(0).cumsum()
+
+    # Calculate incline % using a smoothed window (5 points back and 5 points forward)
+    if 'elevation' in df.columns and df['elevation'].notna().any():
+        window = 5
+        delta_elev = df['elevation'].shift(-window) - df['elevation'].shift(window)
+        delta_dist = df['dist_m'].shift(-window) - df['dist_m'].shift(window)
+        
+        # Avoid division by zero or tiny distances
+        with np.errstate(divide='ignore', invalid='ignore'):
+            incline_pct = (delta_elev / delta_dist) * 100.0
+            incline_pct = np.where(delta_dist > 1.0, incline_pct, 0.0)
+            incline_pct = np.clip(incline_pct, -30.0, 30.0) # Clip extreme noise outliers
+            
+        df['incline_pct'] = pd.Series(incline_pct).fillna(0.0)
+    else:
+        df['incline_pct'] = np.nan
+        
+    return df
+
 def parse_fit_file(file_bytes):
     fitfile = fitparse.FitFile(file_bytes)
     data = []
@@ -54,7 +92,6 @@ def parse_fit_file(file_bytes):
     else:
         df['speed_kmh'] = 0.0
         
-    # Extract altitude / elevation if available
     if 'enhanced_altitude' in df.columns and df['enhanced_altitude'].notna().any():
         df['elevation'] = df['enhanced_altitude']
     elif 'altitude' in df.columns and df['altitude'].notna().any():
@@ -62,6 +99,7 @@ def parse_fit_file(file_bytes):
     elif 'elevation' not in df.columns:
         df['elevation'] = np.nan
         
+    df = calculate_distance_and_incline(df)
     return df
 
 def parse_gpx_file(file_bytes):
@@ -98,12 +136,14 @@ def parse_gpx_file(file_bytes):
             dt_sec = df['timestamp'].diff().dt.total_seconds()
             df['speed_kmh'] = (dist_m / dt_sec) * 3.6
             df['speed_kmh'] = df['speed_kmh'].fillna(0).clip(lower=0, upper=80)
+            
+        df = calculate_distance_and_incline(df)
     else:
         df['speed_kmh'] = 0.0
         
     return df
 
-# Connect to Garmin & Fetch list of last 10 activities
+# Connect to Garmin & Fetch list of last 20 activities
 if login_btn:
     if email and password:
         try:
@@ -111,7 +151,7 @@ if login_btn:
                 client = Garmin(email, password)
                 client.login()
                 st.session_state.garmin_client = client
-                activities = client.get_activities(0, 10) # Fetch last 10 activities
+                activities = client.get_activities(0, 20) # Fetch last 20 activities
                 st.session_state.available_activities = activities
                 st.sidebar.success(f"Connected! Found {len(activities)} recent workouts.")
         except Exception as e:
@@ -131,7 +171,7 @@ if st.session_state.available_activities:
         start_time_str = act.get('startTimeLocal', '')
         options[f"{start_time_str} - {act_name} ({act_id})"] = act
         
-    selected_options = st.sidebar.multiselect("Choose Workouts", list(options.keys()), default=list(options.keys())[:3])
+    selected_options = st.sidebar.multiselect("Choose Workouts (from last 20)", list(options.keys()), default=list(options.keys())[:3])
     download_btn = st.sidebar.button("Download & Analyze Selected")
 
     if download_btn and selected_options:
@@ -317,7 +357,7 @@ if workouts:
             if col2.button(f"🗺️ Map Route", key=f"btn_map_{i}"):
                 st.session_state[key_map] = not st.session_state[key_map]
 
-            if col3.button(f"⛰️ Speed vs. Elevation (Running Only)", key=f"btn_elev_{i}"):
+            if col3.button(f"⛰️ Speed vs. Incline (Running Only)", key=f"btn_elev_{i}"):
                 st.session_state[key_elev] = not st.session_state[key_elev]
 
             if col4.button(f"📊 Stats", key=f"btn_stats_{i}"):
@@ -364,25 +404,25 @@ if workouts:
                 else:
                     st.warning("No GPS data found in this file.")
 
-            # Speed vs. Elevation Chart (Filtered strictly for Running >= 6.5 km/h)
+            # Speed vs. Incline Grade (%) Chart (Filtered strictly for Running >= 6.5 km/h)
             if st.session_state[key_elev]:
                 df = w['df']
-                if 'elevation' in df.columns and 'speed_kmh' in df.columns and df['elevation'].notna().any():
-                    run_df = df[df['speed_kmh'] >= RUN_SPEED_THRESHOLD_KMH].dropna(subset=['elevation', 'speed_kmh'])
+                if 'incline_pct' in df.columns and 'speed_kmh' in df.columns and df['incline_pct'].notna().any():
+                    run_df = df[df['speed_kmh'] >= RUN_SPEED_THRESHOLD_KMH].dropna(subset=['incline_pct', 'speed_kmh'])
                     
                     if not run_df.empty:
                         fig, ax = plt.subplots(figsize=(8, 3.5))
-                        ax.scatter(run_df['elevation'], run_df['speed_kmh'], color='purple', alpha=0.6, edgecolors='none', s=15)
-                        ax.set_title(f"Speed vs. Elevation (Running Only ≥ 6.5 km/h) - {dt_str}", fontsize=10)
-                        ax.set_xlabel("Elevation / Altitude (m)", fontsize=9)
+                        ax.scatter(run_df['incline_pct'], run_df['speed_kmh'], color='purple', alpha=0.6, edgecolors='none', s=15)
+                        ax.set_title(f"Speed vs. Incline / Slope Grade (%) [Running Only ≥ 6.5 km/h] - {dt_str}", fontsize=10)
+                        ax.set_xlabel("Incline / Slope Grade (%)", fontsize=9)
                         ax.set_ylabel("Running Speed (km/h)", fontsize=9)
                         ax.grid(True, linestyle='--', alpha=0.5)
                         plt.tight_layout()
                         st.pyplot(fig, use_container_width=True)
                     else:
-                        st.warning("No running data found above 6.5 km/h with elevation details in this workout.")
+                        st.warning("No running data found above 6.5 km/h with incline details in this workout.")
                 else:
-                    st.warning("Elevation/Altitude data is not available for this file.")
+                    st.warning("Incline/Slope data is not available for this file.")
 
             if st.session_state[key_stats]:
                 df = w['df']
