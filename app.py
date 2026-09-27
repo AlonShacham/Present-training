@@ -59,7 +59,6 @@ def calculate_distance_and_incline(df):
         delta_elev = df['elevation'].shift(-window) - df['elevation'].shift(window)
         delta_dist = df['dist_m'].shift(-window) - df['dist_m'].shift(window)
         
-        # Avoid division by zero or tiny distances
         with np.errstate(divide='ignore', invalid='ignore'):
             incline_pct = (delta_elev / delta_dist) * 100.0
             incline_pct = np.where(delta_dist > 1.0, incline_pct, 0.0)
@@ -248,10 +247,11 @@ if workouts:
     st.markdown("---")
     st.header("🌐 Comparative Charts (All Workouts)")
     
-    col_gen1, col_gen2, col_gen3 = st.columns(3)
+    col_gen1, col_gen2, col_gen3, col_gen4 = st.columns(4)
     
     if 'show_comp_hr' not in st.session_state: st.session_state.show_comp_hr = False
     if 'show_comp_speed' not in st.session_state: st.session_state.show_comp_speed = False
+    if 'show_comp_incline' not in st.session_state: st.session_state.show_comp_incline = False
     if 'show_comp_map' not in st.session_state: st.session_state.show_comp_map = False
 
     if col_gen1.button("📊 Heart Rate Comparison"):
@@ -260,7 +260,10 @@ if workouts:
     if col_gen2.button("🚀 Speed Comparison"):
         st.session_state.show_comp_speed = not st.session_state.show_comp_speed
 
-    if col_gen3.button("🗺️ Combined GPS Route Map"):
+    if col_gen3.button("⛰️ Speed vs. Incline (All Workouts)"):
+        st.session_state.show_comp_incline = not st.session_state.show_comp_incline
+
+    if col_gen4.button("🗺️ Combined GPS Map"):
         st.session_state.show_comp_map = not st.session_state.show_comp_map
 
     if st.session_state.show_comp_hr:
@@ -297,6 +300,28 @@ if workouts:
         ax.legend(loc='best', fontsize='small')
         plt.tight_layout()
         st.pyplot(fig, use_container_width=True)
+
+    if st.session_state.show_comp_incline:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        has_data = False
+        for w in workouts:
+            df = w['df']
+            if 'incline_pct' in df.columns and 'speed_kmh' in df.columns:
+                run_df = df[df['speed_kmh'] >= RUN_SPEED_THRESHOLD_KMH].dropna(subset=['incline_pct', 'speed_kmh'])
+                if not run_df.empty:
+                    label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
+                    ax.scatter(run_df['incline_pct'], run_df['speed_kmh'], label=label_str, alpha=0.5, s=12)
+                    has_data = True
+        if has_data:
+            ax.set_title("Running Speed vs. Incline Grade (%) - All Workouts (≥ 6.5 km/h)", fontsize=11)
+            ax.set_xlabel("Incline / Slope Grade (%)", fontsize=9)
+            ax.set_ylabel("Running Speed (km/h)", fontsize=9)
+            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.legend(loc='best', fontsize='small')
+            plt.tight_layout()
+            st.pyplot(fig, use_container_width=True)
+        else:
+            st.warning("No running incline data available across workouts.")
 
     if st.session_state.show_comp_map:
         gps_tracks = []
@@ -404,7 +429,6 @@ if workouts:
                 else:
                     st.warning("No GPS data found in this file.")
 
-            # Speed vs. Incline Grade (%) Chart (Filtered strictly for Running >= 6.5 km/h)
             if st.session_state[key_elev]:
                 df = w['df']
                 if 'incline_pct' in df.columns and 'speed_kmh' in df.columns and df['incline_pct'].notna().any():
