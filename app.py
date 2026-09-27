@@ -30,6 +30,9 @@ email = st.sidebar.text_input("Garmin Email")
 password = st.sidebar.text_input("Garmin Password", type="password")
 login_btn = st.sidebar.button("Connect & List Workouts")
 
+# Speed threshold for running vs. walking
+RUN_SPEED_THRESHOLD_KMH = 6.5
+
 def parse_fit_file(file_bytes):
     fitfile = fitparse.FitFile(file_bytes)
     data = []
@@ -50,6 +53,14 @@ def parse_fit_file(file_bytes):
         df['speed_kmh'] = df['speed'] * 3.6
     else:
         df['speed_kmh'] = 0.0
+        
+    # Extract altitude / elevation if available
+    if 'enhanced_altitude' in df.columns and df['enhanced_altitude'].notna().any():
+        df['elevation'] = df['enhanced_altitude']
+    elif 'altitude' in df.columns and df['altitude'].notna().any():
+        df['elevation'] = df['altitude']
+    elif 'elevation' not in df.columns:
+        df['elevation'] = np.nan
         
     return df
 
@@ -288,15 +299,17 @@ if workouts:
         file_ext = w['filename'].split('.')[-1].upper()
         
         with st.expander(f"📌 Workout {i+1}: {dt_str} (ID: {w['act_id']}) [{file_ext}]"):
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             key_hr = f"view_hr_{i}"
             key_map = f"view_map_{i}"
             key_stats = f"view_stats_{i}"
+            key_elev = f"view_elev_{i}"
             
             if key_hr not in st.session_state: st.session_state[key_hr] = False
             if key_map not in st.session_state: st.session_state[key_map] = False
             if key_stats not in st.session_state: st.session_state[key_stats] = False
+            if key_elev not in st.session_state: st.session_state[key_elev] = False
 
             if col1.button(f"📈 HR & Speed", key=f"btn_hr_{i}"):
                 st.session_state[key_hr] = not st.session_state[key_hr]
@@ -304,7 +317,10 @@ if workouts:
             if col2.button(f"🗺️ Map Route", key=f"btn_map_{i}"):
                 st.session_state[key_map] = not st.session_state[key_map]
 
-            if col3.button(f"📊 Stats", key=f"btn_stats_{i}"):
+            if col3.button(f"⛰️ Speed vs. Elevation (Running Only)", key=f"btn_elev_{i}"):
+                st.session_state[key_elev] = not st.session_state[key_elev]
+
+            if col4.button(f"📊 Stats", key=f"btn_stats_{i}"):
                 st.session_state[key_stats] = not st.session_state[key_stats]
 
             if st.session_state[key_hr]:
@@ -348,13 +364,44 @@ if workouts:
                 else:
                     st.warning("No GPS data found in this file.")
 
+            # Speed vs. Elevation Chart (Filtered strictly for Running >= 6.5 km/h)
+            if st.session_state[key_elev]:
+                df = w['df']
+                if 'elevation' in df.columns and 'speed_kmh' in df.columns and df['elevation'].notna().any():
+                    run_df = df[df['speed_kmh'] >= RUN_SPEED_THRESHOLD_KMH].dropna(subset=['elevation', 'speed_kmh'])
+                    
+                    if not run_df.empty:
+                        fig, ax = plt.subplots(figsize=(8, 3.5))
+                        ax.scatter(run_df['elevation'], run_df['speed_kmh'], color='purple', alpha=0.6, edgecolors='none', s=15)
+                        ax.set_title(f"Speed vs. Elevation (Running Only ≥ 6.5 km/h) - {dt_str}", fontsize=10)
+                        ax.set_xlabel("Elevation / Altitude (m)", fontsize=9)
+                        ax.set_ylabel("Running Speed (km/h)", fontsize=9)
+                        ax.grid(True, linestyle='--', alpha=0.5)
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("No running data found above 6.5 km/h with elevation details in this workout.")
+                else:
+                    st.warning("Elevation/Altitude data is not available for this file.")
+
             if st.session_state[key_stats]:
                 df = w['df']
                 duration = (df['timestamp'].iloc[-1] - df['timestamp'].iloc[0]).total_seconds() / 60
+                
+                run_df = df[df['speed_kmh'] >= RUN_SPEED_THRESHOLD_KMH]
+                walk_df = df[df['speed_kmh'] < RUN_SPEED_THRESHOLD_KMH]
+                
+                run_time_min = len(run_df) / 60.0
+                walk_time_min = len(walk_df) / 60.0
+                
+                avg_run_speed = run_df['speed_kmh'].mean() if not run_df.empty else 0.0
+                avg_walk_speed = walk_df['speed_kmh'].mean() if not walk_df.empty else 0.0
                 max_speed = df['speed_kmh'].max() if 'speed_kmh' in df.columns else 0
                 avg_hr = df['heart_rate'].mean() if 'heart_rate' in df.columns and df['heart_rate'].notna().any() else None
                 
-                st.write(f"⏱️ **Duration:** {duration:.1f} min")
+                st.write(f"⏱️ **Total Duration:** {duration:.1f} min")
+                st.write(f"🏃‍♂️ **Running Time (≥ 6.5 km/h):** {run_time_min:.1f} min (Avg Speed: {avg_run_speed:.2f} km/h)")
+                st.write(f"🚶‍♂️ **Walking Time (< 6.5 km/h):** {walk_time_min:.1f} min (Avg Speed: {avg_walk_speed:.2f} km/h)")
                 st.write(f"🚀 **Max Speed:** {max_speed:.2f} km/h")
                 if avg_hr is not None:
                     st.write(f"❤️ **Avg Heart Rate:** {avg_hr:.0f} bpm")
