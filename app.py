@@ -441,8 +441,11 @@ with tab1:
                 color = colors[idx % len(colors)]
                 folium.PolyLine(coords, color=color, weight=3.5, opacity=0.85, popup=label, tooltip=label).add_to(m)
             
-            m.fit_bounds([[min(all_lats), min(all_lons)], [max(all_lats), max(all_lons)]], padding=(10, 10))
-            st_folium(m, use_container_width=True, height=450, key="combined_map")
+            min_lat, max_lat = min(all_lats), max(all_lats)
+            min_lon, max_lon = min(all_lons), max(all_lons)
+            m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=(10, 10))
+            
+            st_folium(m, use_container_width=True, height=450, key="combined_map", returned_objects=[])
     else:
         st.info("👋 Welcome! Connect to Garmin Connect or upload FIT/GPX files from the sidebar to analyze your workouts.")
 
@@ -519,14 +522,25 @@ with tab2:
                             lons = (map_df['position_long'] * (180 / 2**31)).tolist()
                             coords = list(zip(lats, lons))
                             
-                            # יצירת המפה ללא zoom_start קבוע כדי ש-fit_bounds יקבע את הזום במדויק
-                            m_ind = folium.Map(tiles=MAP_TILES, attr=MAP_ATTR)
+                            min_lat, max_lat = min(lats), max(lats)
+                            min_lon, max_lon = min(lons), max(lons)
+                            center_lat = (min_lat + max_lat) / 2
+                            center_lon = (min_lon + max_lon) / 2
+                            
+                            # יצירת המפה ממורכזת סביב המסלול
+                            m_ind = folium.Map(location=[center_lat, center_lon], tiles=MAP_TILES, attr=MAP_ATTR)
                             folium.PolyLine(coords, color="#2563EB", weight=4, opacity=0.9).add_to(m_ind)
                             
-                            # התאמת הזום בדיוק למסגרת המסלול
-                            m_ind.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(10, 10))
+                            # התאמת גבולות זום מדויקת והעברת returned_objects=[] לנטרול אירועי מפה מיותרים
+                            m_ind.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=(10, 10))
                             
-                            st_folium(m_ind, use_container_width=True, height=350, key=f"ind_map_{w['act_id']}_{i}")
+                            st_folium(
+                                m_ind,
+                                use_container_width=True,
+                                height=350,
+                                key=f"ind_map_{w['act_id']}_{i}",
+                                returned_objects=[]
+                            )
                     else:
                         st.info("No GPS coordinates in file.")
 
