@@ -93,7 +93,7 @@ COLOR_SPEED = "#00D2FF"     # Electric Cyan
 COLOR_INCLINE = "#A855F7"   # Violet
 COLOR_RUN = "#10B981"       # Emerald Green
 COLOR_WALK = "#F59E0B"      # Amber Yellow
-DARK_MAP_TILES = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+DARK_MAP_TILES = "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
 MAP_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 
 # --- Helper Functions & Analytics ---
@@ -497,8 +497,8 @@ with tab2:
                     margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified"
                 )
                 fig_ind.update_xaxes(title_text="Elapsed Time (min)")
-                fig_ind.update_yaxes(title_text="Heart Rate (bpm)", titlefont=dict(color=COLOR_HR), tickfont=dict(color=COLOR_HR), secondary_y=False)
-                fig_ind.update_yaxes(title_text="Speed (km/h)", titlefont=dict(color=COLOR_SPEED), tickfont=dict(color=COLOR_SPEED), secondary_y=True)
+                fig_ind.update_yaxes(title_text="Heart Rate (bpm)", title_font=dict(color=COLOR_HR), tickfont=dict(color=COLOR_HR), secondary_y=False)
+                fig_ind.update_yaxes(title_text="Speed (km/h)", title_font=dict(color=COLOR_SPEED), tickfont=dict(color=COLOR_SPEED), secondary_y=True)
                 
                 st.plotly_chart(fig_ind, use_container_width=True)
 
