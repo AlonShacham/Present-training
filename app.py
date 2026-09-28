@@ -87,14 +87,16 @@ if 'garmin_client' not in st.session_state: st.session_state.garmin_client = Non
 if 'connected_email' not in st.session_state: st.session_state.connected_email = ""
 if 'run_threshold_kmh' not in st.session_state: st.session_state.run_threshold_kmh = 6.5
 
-# --- Color Constants ---
+# --- Color Constants & Map Settings ---
 COLOR_HR = "#FF4B4B"        # Neon Red / Rose
 COLOR_SPEED = "#00D2FF"     # Electric Cyan
 COLOR_INCLINE = "#A855F7"   # Violet
 COLOR_RUN = "#10B981"       # Emerald Green
 COLOR_WALK = "#F59E0B"      # Amber Yellow
-DARK_MAP_TILES = "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
-MAP_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+
+# Standard OpenStreetMap Tiles (Free, No API Key Required)
+MAP_TILES = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+MAP_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 
 # --- Helper Functions & Analytics ---
 def calculate_distance_and_incline(df):
@@ -415,7 +417,7 @@ with tab1:
         # 4. Combined GPS Route Map
         st.subheader("🗺️ Combined GPS Route Map")
         gps_tracks = []
-        colors = ['#00D2FF', '#FF4B4B', '#10B981', '#A855F7', '#F59E0B', '#3B82F6', '#EC4899', '#6366F1']
+        colors = ['#D97706', '#DC2626', '#059669', '#7C3AED', '#2563EB', '#DB2777', '#4F46E5']
         
         for w in workouts:
             df = w['df']
@@ -431,7 +433,7 @@ with tab1:
             all_lats = [pt[0] for track in gps_tracks for pt in track[1]]
             all_lons = [pt[1] for track in gps_tracks for pt in track[1]]
             
-            m = folium.Map(tiles=DARK_MAP_TILES, attr=MAP_ATTR)
+            m = folium.Map(tiles=MAP_TILES, attr=MAP_ATTR)
             for idx, (label, coords) in enumerate(gps_tracks):
                 color = colors[idx % len(colors)]
                 folium.PolyLine(coords, color=color, weight=3.5, opacity=0.85, popup=label, tooltip=label).add_to(m)
@@ -514,8 +516,8 @@ with tab2:
                             lons = (map_df['position_long'] * (180 / 2**31)).tolist()
                             coords = list(zip(lats, lons))
                             
-                            m_ind = folium.Map(tiles=DARK_MAP_TILES, attr=MAP_ATTR)
-                            folium.PolyLine(coords, color=COLOR_SPEED, weight=4, opacity=0.9).add_to(m_ind)
+                            m_ind = folium.Map(tiles=MAP_TILES, attr=MAP_ATTR)
+                            folium.PolyLine(coords, color="#2563EB", weight=4, opacity=0.9).add_to(m_ind)
                             m_ind.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(15, 15))
                             st_folium(m_ind, use_container_width=True, height=350, key=f"ind_map_{i}")
                     else:
