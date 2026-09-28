@@ -6,7 +6,7 @@ import fitparse
 import gpxpy
 import folium
 from streamlit_folium import st_folium
-from garminconnect import Garmin
+from garminconnect import Garmin, GarminConnectAuthenticationError, GarminConnectTooManyRequestsError
 import zipfile
 import io
 import plotly.graph_objects as go
@@ -232,8 +232,10 @@ else:
                 st.session_state.connected_email = email_input
                 st.session_state.available_activities = client.get_activities(0, 20)
                 st.rerun()
+        except (GarminConnectAuthenticationError, GarminConnectTooManyRequestsError) as auth_err:
+            st.sidebar.error("⚠️ Garmin חסם את ההתחברות האוטומטית (Cloudflare / 2FA). ניתן להעלות קובצי FIT/GPX ישירות למטה.")
         except Exception as e:
-            st.sidebar.error(f"Login failed: {e}")
+            st.sidebar.error(f"Login failed: {e}. ניתן להעלות קובצי FIT/GPX ישירות למטה.")
 
 if st.session_state.available_activities:
     st.sidebar.markdown("---")
@@ -288,7 +290,8 @@ if st.session_state.available_activities:
         st.sidebar.success(f"Loaded {len(fetched_workouts)} workout(s)!")
 
 st.sidebar.markdown("---")
-uploaded_files = st.sidebar.file_uploader("Or Upload FIT/GPX Files", type=["fit", "FIT", "gpx", "GPX"], accept_multiple_files=True)
+st.sidebar.subheader("📁 העלאת קבצים ישירה")
+uploaded_files = st.sidebar.file_uploader("Upload FIT/GPX Files", type=["fit", "FIT", "gpx", "GPX"], accept_multiple_files=True)
 
 if uploaded_files:
     uploaded_workouts = []
