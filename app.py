@@ -436,15 +436,12 @@ with tab1:
             all_lats = [pt[0] for track in gps_tracks for pt in track[1]]
             all_lons = [pt[1] for track in gps_tracks for pt in track[1]]
             
-            avg_lat_comb = np.mean(all_lats)
-            avg_lon_comb = np.mean(all_lons)
-            
-            m = folium.Map(location=[avg_lat_comb, avg_lon_comb], zoom_start=12, tiles=MAP_TILES, attr=MAP_ATTR)
+            m = folium.Map(tiles=MAP_TILES, attr=MAP_ATTR)
             for idx, (label, coords) in enumerate(gps_tracks):
                 color = colors[idx % len(colors)]
                 folium.PolyLine(coords, color=color, weight=3.5, opacity=0.85, popup=label, tooltip=label).add_to(m)
             
-            m.fit_bounds([[min(all_lats), min(all_lons)], [max(all_lats), max(all_lons)]], padding=(20, 20))
+            m.fit_bounds([[min(all_lats), min(all_lons)], [max(all_lats), max(all_lons)]], padding=(10, 10))
             st_folium(m, use_container_width=True, height=450, key="combined_map")
     else:
         st.info("👋 Welcome! Connect to Garmin Connect or upload FIT/GPX files from the sidebar to analyze your workouts.")
@@ -522,16 +519,12 @@ with tab2:
                             lons = (map_df['position_long'] * (180 / 2**31)).tolist()
                             coords = list(zip(lats, lons))
                             
-                            # חישוב נקודת מרכז מדויקת לאימון
-                            avg_lat = np.mean(lats)
-                            avg_lon = np.mean(lons)
-                            
-                            # יצירת המפה עם מיקום מרכזי
-                            m_ind = folium.Map(location=[avg_lat, avg_lon], zoom_start=13, tiles=MAP_TILES, attr=MAP_ATTR)
+                            # יצירת המפה ללא zoom_start קבוע כדי ש-fit_bounds יקבע את הזום במדויק
+                            m_ind = folium.Map(tiles=MAP_TILES, attr=MAP_ATTR)
                             folium.PolyLine(coords, color="#2563EB", weight=4, opacity=0.9).add_to(m_ind)
                             
-                            # התאמת גבולות זום מדויקת
-                            m_ind.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(20, 20))
+                            # התאמת הזום בדיוק למסגרת המסלול
+                            m_ind.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(10, 10))
                             
                             st_folium(m_ind, use_container_width=True, height=350, key=f"ind_map_{w['act_id']}_{i}")
                     else:
