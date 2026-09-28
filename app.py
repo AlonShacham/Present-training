@@ -90,6 +90,7 @@ if 'run_threshold_kmh' not in st.session_state: st.session_state.run_threshold_k
 # --- Color Constants & Map Settings ---
 COLOR_HR = "#FF4B4B"        # Neon Red / Rose
 COLOR_SPEED = "#00D2FF"     # Electric Cyan
+COLOR_ELEVATION = "#10B981" # Emerald Green / Elevation
 COLOR_INCLINE = "#A855F7"   # Violet
 COLOR_RUN = "#10B981"       # Emerald Green
 COLOR_WALK = "#F59E0B"      # Amber Yellow
@@ -391,7 +392,31 @@ with tab1:
         )
         st.plotly_chart(fig_sp, use_container_width=True)
 
-        # 3. Comparative Speed vs. Incline Grade (%) Scatter
+        # 3. Comparative Elevation Profile Plotly (חדש!)
+        st.subheader("🏔️ Elevation Profile Comparison")
+        fig_elev = go.Figure()
+        has_elev = False
+        for w in workouts:
+            df = w['df']
+            if 'elevation' in df.columns and not df['elevation'].dropna().empty:
+                label_str = f"{w['start_time'].strftime('%Y-%m-%d')} ({w['act_id']})"
+                fig_elev.add_trace(go.Scatter(
+                    x=df['dist_km'], y=df['elevation'],
+                    mode='lines', name=label_str,
+                    hovertemplate="Distance: %{x:.2f} km<br>Elevation: %{y:.1f} m<extra></extra>"
+                ))
+                has_elev = True
+        if has_elev:
+            fig_elev.update_layout(
+                template="plotly_dark", paper_bgcolor="#161B22", plot_bgcolor="#161B22",
+                margin=dict(l=20, r=20, t=30, b=20), hovermode="x unified",
+                xaxis_title="Distance (km)", yaxis_title="Elevation (m)"
+            )
+            st.plotly_chart(fig_elev, use_container_width=True)
+        else:
+            st.info("No elevation data available across workouts.")
+
+        # 4. Comparative Speed vs. Incline Grade (%) Scatter
         st.subheader("⛰️ Running Speed vs. Incline Grade (%) (All Workouts)")
         fig_inc = go.Figure()
         has_inc = False
@@ -417,7 +442,7 @@ with tab1:
         else:
             st.info("No running incline data available across workouts.")
 
-        # 4. Combined GPS Route Map
+        # 5. Combined GPS Route Map
         st.subheader("🗺️ Combined GPS Route Map")
         gps_tracks = []
         colors = ['#D97706', '#DC2626', '#059669', '#7C3AED', '#2563EB', '#DB2777', '#4F46E5']
@@ -477,7 +502,7 @@ with tab2:
 
                 st.markdown("---")
                 
-                # Dual Axis Plotly Chart via make_subplots
+                # Dual Axis Plotly Chart via make_subplots (HR & Speed)
                 fig_ind = make_subplots(specs=[[{"secondary_y": True}]])
                 
                 if 'heart_rate' in df.columns:
@@ -510,6 +535,25 @@ with tab2:
                 
                 st.plotly_chart(fig_ind, use_container_width=True)
 
+                # Individual Elevation Profile Chart (חדש!)
+                if 'elevation' in df.columns and not df['elevation'].dropna().empty:
+                    fig_ind_elev = go.Figure()
+                    fig_ind_elev.add_trace(go.Scatter(
+                        x=df['dist_km'], y=df['elevation'],
+                        mode='lines', name="Elevation (m)",
+                        fill='tozeroy',
+                        fillcolor='rgba(16, 185, 129, 0.2)',
+                        line=dict(color=COLOR_ELEVATION, width=2),
+                        hovertemplate="Distance: %{x:.2f} km<br>Elevation: %{y:.1f} m<extra></extra>"
+                    ))
+                    fig_ind_elev.update_layout(
+                        template="plotly_dark", paper_bgcolor="#161B22", plot_bgcolor="#161B22",
+                        title="🏔️ Elevation Profile",
+                        margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified",
+                        xaxis_title="Distance (km)", yaxis_title="Elevation (m)"
+                    )
+                    st.plotly_chart(fig_ind_elev, use_container_width=True)
+
                 col_map, col_scatter = st.columns(2)
                 
                 # Individual Route Map
@@ -527,11 +571,8 @@ with tab2:
                             center_lat = (min_lat + max_lat) / 2
                             center_lon = (min_lon + max_lon) / 2
                             
-                            # יצירת המפה ממורכזת סביב המסלול
                             m_ind = folium.Map(location=[center_lat, center_lon], tiles=MAP_TILES, attr=MAP_ATTR)
                             folium.PolyLine(coords, color="#2563EB", weight=4, opacity=0.9).add_to(m_ind)
-                            
-                            # התאמת גבולות זום מדויקת והעברת returned_objects=[] לנטרול אירועי מפה מיותרים
                             m_ind.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=(10, 10))
                             
                             st_folium(
